@@ -75,7 +75,12 @@ irc_server_loop(Socket, Turn) ->
 	{tcp, Socket, Bin} ->
 %	    io:format("Got data~n"),
 	    L = binary_to_list(Bin),
-	    T = string:tokens(L, "\r\n"),
+%	    io:format("L ~p~n", [L]),
+	    EndPos = string:rstr(L, "\r\n"),
+%	    io:format("EndPos ~p~n", [EndPos]),
+	    OkStr = string:substr(L, 1, EndPos+1),
+%	    LostStr = string:substr(L, EndPos+2),
+	    T = string:tokens(OkStr, "\r\n"),
 %	    io:format("Number of tokens is ~p\n", [length(T)]),
 	    handle_server_message(T, Socket),
 	    irc_server_loop(Socket, Turn1);
@@ -93,7 +98,7 @@ send_data(Payload) ->
 handle_server_message([H|T], Socket)->
 %    io:format("~p ~s~n", [calendar:local_time(),H]),
     Message = string:tokens(H, " "),
-    io:format("~p~n", [Message]),
+%    io:format("~p~n", [Message]),
     First = lists:nth(1, Message),
     case string:str(First, ":") of
 	0 ->
