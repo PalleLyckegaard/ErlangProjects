@@ -35,7 +35,7 @@ irc_server() ->
 	{From, {connect, Hostname, Nickname}} ->
 	    {ok, Socket} = gen_tcp:connect(Hostname, 6667,[binary, {packet, 0}]),
 %	    io:format("Connected to [~p] using Socket [~s]~n", [Hostname, Socket]),
-	    Pid = spawn(fun() -> irc_server_loop(Socket, 1) end),
+	    Pid = spawn(fun() -> irc_server_loop(Socket, []) end),
 	    true = register(irc_server, Pid),
 %	    WhereisPid = whereis(irc_server),
 %	    io:format("[irc_server] is PID [~p]~n", [WhereisPid]),
@@ -67,44 +67,39 @@ irc_server() ->
 	    irc_server()
     end.
 
-irc_server_loop(Socket, Turn) ->
-%    io:format("Entering loop with PID [~p] Socket [~p]~n", [self(), Socket]),
-    Turn1 = Turn + 1,
-%    io:format("Turn: ~p\n", [Turn1]),
+irc_server_loop(Socket, Leftover) ->
     receive
 	{tcp, Socket, Bin} ->
-%	    io:format("Got data~n"),
-	    L = binary_to_list(Bin),
-%	    io:format("L ~p~n", [L]),
-	    EndPos = string:rstr(L, "\r\n"),
-%	    io:format("EndPos ~p~n", [EndPos]),
-	    OkStr = string:substr(L, 1, EndPos+1),
-%	    LostStr = string:substr(L, EndPos+2),
-	    T = string:tokens(OkStr, "\r\n"),
-%	    io:format("Number of tokens is ~p\n", [length(T)]),
-	    handle_server_message(T, Socket),
-	    irc_server_loop(Socket, Turn1);
+	    io:format("Leftover length: ~p~n", [length(Leftover)]),
+	    L = Leftover ++ binary_to_list(Bin),
+	    LastCrLfPos = string:rstr(L, "\r\n"),
+	    case (LastCrLfPos+1) =:= string:len(L) of
+		true ->
+		    io:format("L:~n~s", [L]),
+		    T = string:tokens(L, "\r\n"),
+		    handle_server_message(T, Socket),
+		    irc_server_loop(Socket, []);
+		false ->
+		    irc_server_loop(Socket, L)
+	    end;
 	{tcp_closed, Socket} ->
 	    io:format("Connection closed~n"),
-	    irc_server_loop(Socket, Turn1);
+	    irc_server_loop(Socket, []);
 	{irc_client_request, Payload} ->
 	    ok = gen_tcp:send(Socket, list_to_binary(Payload)),
-	    irc_server_loop(Socket, Turn1)
+	    irc_server_loop(Socket, [])
     end.
 
 send_data(Payload) ->
     irc_server ! {irc_client_request, Payload}.
 
 handle_server_message([H|T], Socket)->
-%    io:format("~p ~s~n", [calendar:local_time(),H]),
     Message = string:tokens(H, " "),
-%    io:format("~p~n", [Message]),
     First = lists:nth(1, Message),
     case string:str(First, ":") of
 	0 ->
 	    case string:str(First, "PING") of
 		1 ->
-%		    io:format("Got a PING~n"),
 		    send_data(["PONG\r\n"]);
 		_ ->
 		    io:format("Unhandled command ~s~n", [First])
