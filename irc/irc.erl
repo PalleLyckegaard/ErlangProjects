@@ -34,13 +34,9 @@ irc_server() ->
     receive
 	{From, {connect, Hostname, Nickname}} ->
 	    {ok, Socket} = gen_tcp:connect(Hostname, 6667,[binary, {packet, 0}]),
-%	    io:format("Connected to [~p] using Socket [~s]~n", [Hostname, Socket]),
 	    Pid = spawn(fun() -> irc_server_loop(Socket, []) end),
 	    true = register(irc_server, Pid),
-%	    WhereisPid = whereis(irc_server),
-%	    io:format("[irc_server] is PID [~p]~n", [WhereisPid]),
 	    ok = gen_tcp:controlling_process(Socket, Pid),
-%	    io:format("Spawned PID [~p]~n", [Pid]),
 	    send_data(["NICK", " ", Nickname, "\r\n"]),
  	    send_data(["USER pling plang plong :ding dong\r\n"]),
 	    From ! {irc, {ok, connected}},
@@ -70,12 +66,10 @@ irc_server() ->
 irc_server_loop(Socket, Leftover) ->
     receive
 	{tcp, Socket, Bin} ->
-	    io:format("Leftover length: ~p~n", [length(Leftover)]),
 	    L = Leftover ++ binary_to_list(Bin),
 	    LastCrLfPos = string:rstr(L, "\r\n"),
 	    case (LastCrLfPos+1) =:= string:len(L) of
 		true ->
-		    io:format("L:~n~s", [L]),
 		    T = string:tokens(L, "\r\n"),
 		    handle_server_message(T, Socket),
 		    irc_server_loop(Socket, []);
@@ -87,6 +81,9 @@ irc_server_loop(Socket, Leftover) ->
 	    irc_server_loop(Socket, []);
 	{irc_client_request, Payload} ->
 	    ok = gen_tcp:send(Socket, list_to_binary(Payload)),
+	    irc_server_loop(Socket, []);
+	{error, closed}  ->
+	    io:format("Connection closed by peer~n"),
 	    irc_server_loop(Socket, [])
     end.
 
