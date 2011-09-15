@@ -66,16 +66,31 @@ irc_server() ->
 irc_server_loop(Socket, Leftover) ->
     receive
 	{tcp, Socket, Bin} ->
+%	    io:format("Leftover: ~p~n", [Leftover]),
 	    L = Leftover ++ binary_to_list(Bin),
+%	    io:format("L: ~p~n", [L]),
 	    LastCrLfPos = string:rstr(L, "\r\n"),
-	    case (LastCrLfPos+1) =:= string:len(L) of
-		true ->
-		    T = string:tokens(L, "\r\n"),
-		    handle_server_message(T, Socket),
-		    irc_server_loop(Socket, []);
-		false ->
-		    irc_server_loop(Socket, L)
-	    end;
+%	    io:format("LastCrLfPos: ~p~n", [LastCrLfPos]),
+	    LinesWithCrLf = 
+		case LastCrLfPos of 
+		    0 ->
+			[];
+		    _ ->
+			string:substr(L, 1, LastCrLfPos+1)
+		end,
+%	    io:format("LinesWithCrLF: ~p~n", [LinesWithCrLf]),
+	    Leftoversize = string:len(L)-string:len(LinesWithCrLf),
+%	    io:format("Leftoversize: ~p~n", [Leftoversize]),
+	    NewLeftover = 
+		if
+		    Leftoversize == 0 -> [];
+		    Leftoversize > 0  -> string:substr(L, LastCrLfPos+2, Leftoversize)
+		end,
+%	    io:format("NewLeftover: ~p~n", [NewLeftover]),
+	    T = string:tokens(LinesWithCrLf, "\r\n"),
+%	    io:format("T: ~p~n", [T]),
+	    handle_server_message(T, Socket),
+	    irc_server_loop(Socket, NewLeftover);
 	{tcp_closed, Socket} ->
 	    io:format("Connection closed~n"),
 	    irc_server_loop(Socket, []);
