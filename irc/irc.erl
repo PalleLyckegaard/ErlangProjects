@@ -34,7 +34,7 @@ irc_server() ->
     receive
 	{From, {connect, Hostname, Nickname}} ->
 	    {ok, Socket} = gen_tcp:connect(Hostname, 6667,[binary, {packet, 0}]),
-	    Pid = spawn(fun() -> irc_server_loop(Socket, []) end),
+	    Pid = spawn(fun() -> irc_server_loop(Socket, [], dict:new()) end),
 	    true = register(irc_server, Pid),
 	    ok = gen_tcp:controlling_process(Socket, Pid),
 	    send_data(["NICK", " ", Nickname, "\r\n"]),
@@ -51,6 +51,7 @@ irc_server() ->
 	    From ! {irc, ok},
 	    irc_server();
 	{From, {join, Channel}} ->
+	    send_join_channel(Channel),
  	    send_data(["JOIN", " ", Channel, "\r\n"]),
 	    From ! {irc, ok},
 	    irc_server();
@@ -63,14 +64,11 @@ irc_server() ->
 	    irc_server()
     end.
 
-irc_server_loop(Socket, Leftover) ->
+irc_server_loop(Socket, Leftover, Dict) ->
     receive
 	{tcp, Socket, Bin} ->
-%	    io:format("Leftover: ~p~n", [Leftover]),
 	    L = Leftover ++ binary_to_list(Bin),
-%	    io:format("L: ~p~n", [L]),
 	    LastCrLfPos = string:rstr(L, "\r\n"),
-%	    io:format("LastCrLfPos: ~p~n", [LastCrLfPos]),
 	    LinesWithCrLf = 
 		case LastCrLfPos of 
 		    0 ->
@@ -78,34 +76,38 @@ irc_server_loop(Socket, Leftover) ->
 		    _ ->
 			string:substr(L, 1, LastCrLfPos+1)
 		end,
-%	    io:format("LinesWithCrLF: ~p~n", [LinesWithCrLf]),
 	    Leftoversize = string:len(L)-string:len(LinesWithCrLf),
-%	    io:format("Leftoversize: ~p~n", [Leftoversize]),
 	    NewLeftover = 
 		if
 		    Leftoversize == 0 -> [];
 		    Leftoversize > 0  -> string:substr(L, LastCrLfPos+2, Leftoversize)
 		end,
-%	    io:format("NewLeftover: ~p~n", [NewLeftover]),
 	    T = string:tokens(LinesWithCrLf, "\r\n"),
-%	    io:format("T: ~p~n", [T]),
-	    handle_server_message(T, Socket),
-	    irc_server_loop(Socket, NewLeftover);
+	    Dict1 = handle_server_message(T, Socket, Dict),
+	    irc_server_loop(Socket, NewLeftover, Dict1);
 	{tcp_closed, Socket} ->
 	    io:format("Connection closed~n"),
-	    irc_server_loop(Socket, []);
-	{irc_client_request, Payload} ->
-	    ok = gen_tcp:send(Socket, list_to_binary(Payload)),
-	    irc_server_loop(Socket, []);
+	    irc_server_loop(Socket, [], Dict);
 	{error, closed}  ->
 	    io:format("Connection closed by peer~n"),
-	    irc_server_loop(Socket, [])
+	    irc_server_loop(Socket, [], Dict);
+	{irc_client_request, Payload} ->
+	    ok = gen_tcp:send(Socket, list_to_binary(Payload)),
+	    irc_server_loop(Socket, [], Dict);
+	{irc_client_request_join_channel, Channel} ->
+	    ChannelPid = spawn(fun() -> channel_handler(Channel) end),
+	    io:format("Spawned new process ~p for handling channel ~s~n", [ChannelPid, Channel]),
+	    NewDict = dict:store(Channel, ChannelPid, Dict),
+	    irc_server_loop(Socket, [], NewDict)
     end.
 
 send_data(Payload) ->
     irc_server ! {irc_client_request, Payload}.
 
-handle_server_message([H|T], Socket)->
+send_join_channel(Channel) ->
+    irc_server ! {irc_client_request_join_channel, Channel}.
+
+handle_server_message([H|T], Socket, Dict)->
     Message = string:tokens(H, " "),
     First = lists:nth(1, Message),
     case string:str(First, ":") of
@@ -114,20 +116,42 @@ handle_server_message([H|T], Socket)->
 		1 ->
 		    send_data(["PONG\r\n"]);
 		_ ->
-		    io:format("Unhandled command ~s~n", [First])
+		    io:format("Unhandled command ~s~n", [H])
 	    end;
 	_ ->
 	    Second = lists:nth(2, Message),
 	    case Second of 
 		"PRIVMSG" ->
-		    io:format("~p ~s~n", [calendar:local_time(),H]);
+		    Third = lists:nth(3, Message),
+		    % io:format("Third: ~p~n", [Third]),
+		    {ok, ChannelPID } = dict:find(Third, Dict),
+		    % io:format("ChannelPID: ~p~n", [ChannelPID]),
+		    ChannelPID ! {channel_message, H};
+		% RPL_LIST (322)
+		"322" ->
+		    Channel = lists:nth(4, Message);
+		    %io:format("Channel: ~s~n", [Channel]);
 		_ ->
-		    ok
+		    Dict
 	    end,
-	    ok
+	    Dict
     end,
-    handle_server_message(T, Socket);
-handle_server_message([], Socket) ->
-    ok.
+    handle_server_message(T, Socket, Dict);
+
+handle_server_message([], Socket, Dict) ->
+    Dict.
+
+
+channel_handler(Channel) ->
+    % io:format("Channel handler for ~s~n", [Channel]),
+    receive
+	{channel_message, Message} ->
+	    io:format("~p ~s ~s~n", [calendar:local_time(),Channel, Message]),
+	    channel_handler(Channel);
+	    
+	Any ->
+	    io:format("Received unhandle [~p]~n", [Any]),
+	    channel_handler(Channel)
+    end.
 
 
