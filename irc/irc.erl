@@ -51,8 +51,8 @@ irc_server() ->
 	    From ! {irc, ok},
 	    irc_server();
 	{From, {join, Channel}} ->
-	    send_join_channel(Channel),
  	    send_data(["JOIN", " ", Channel, "\r\n"]),
+	    send_join_channel(Channel),
 	    From ! {irc, ok},
 	    irc_server();
 	{From, {leave, Channel}} ->
@@ -65,9 +65,11 @@ irc_server() ->
     end.
 
 irc_server_loop(Socket, Leftover, Dict) ->
+    % io:format("Leftover: ~p~n", [Leftover]),
     receive
 	{tcp, Socket, Bin} ->
 	    L = Leftover ++ binary_to_list(Bin),
+	    % io:format("L: ~s", [L]),
 	    LastCrLfPos = string:rstr(L, "\r\n"),
 	    LinesWithCrLf = 
 		case LastCrLfPos of 
@@ -82,23 +84,24 @@ irc_server_loop(Socket, Leftover, Dict) ->
 		    Leftoversize == 0 -> [];
 		    Leftoversize > 0  -> string:substr(L, LastCrLfPos+2, Leftoversize)
 		end,
+	    % io:format("NewLeftover: ~p~n", [NewLeftover]),
 	    T = string:tokens(LinesWithCrLf, "\r\n"),
 	    Dict1 = handle_server_message(T, Socket, Dict),
 	    irc_server_loop(Socket, NewLeftover, Dict1);
 	{tcp_closed, Socket} ->
 	    io:format("Connection closed~n"),
-	    irc_server_loop(Socket, [], Dict);
+	    irc_server_loop(Socket, Leftover, Dict);
 	{error, closed}  ->
 	    io:format("Connection closed by peer~n"),
-	    irc_server_loop(Socket, [], Dict);
+	    irc_server_loop(Socket, Leftover, Dict);
 	{irc_client_request, Payload} ->
 	    ok = gen_tcp:send(Socket, list_to_binary(Payload)),
-	    irc_server_loop(Socket, [], Dict);
+	    irc_server_loop(Socket, Leftover, Dict);
 	{irc_client_request_join_channel, Channel} ->
 	    ChannelPid = spawn(fun() -> channel_handler(Channel) end),
-	    io:format("Spawned new process ~p for handling channel ~s~n", [ChannelPid, Channel]),
+	    % io:format("Spawned new process ~p for handling channel ~s~n", [ChannelPid, Channel]),
 	    NewDict = dict:store(Channel, ChannelPid, Dict),
-	    irc_server_loop(Socket, [], NewDict)
+	    irc_server_loop(Socket, Leftover, NewDict)
     end.
 
 send_data(Payload) ->
@@ -108,7 +111,9 @@ send_join_channel(Channel) ->
     irc_server ! {irc_client_request_join_channel, Channel}.
 
 handle_server_message([H|T], Socket, Dict)->
+    %io:format("H: ~s~n", [H]),
     Message = string:tokens(H, " "),
+    %io:format("Message: ~s~n", [Message]),
     First = lists:nth(1, Message),
     case string:str(First, ":") of
 	0 ->
@@ -125,12 +130,13 @@ handle_server_message([H|T], Socket, Dict)->
 		    Third = lists:nth(3, Message),
 		    % io:format("Third: ~p~n", [Third]),
 		    {ok, ChannelPID } = dict:find(Third, Dict),
-		    % io:format("ChannelPID: ~p~n", [ChannelPID]),
+		    io:format("ChannelPID: ~p  Message: ~p ~n", [ChannelPID,H]),
 		    ChannelPID ! {channel_message, H};
 		% RPL_LIST (322)
 		"322" ->
-		    Channel = lists:nth(4, Message);
-		    %io:format("Channel: ~s~n", [Channel]);
+		    Channel = lists:nth(4, Message),
+		    send_join_channel(Channel);
+		    % io:format("Sent message to ~s channel handler~n", [Channel]);
 		_ ->
 		    Dict
 	    end,
@@ -138,12 +144,12 @@ handle_server_message([H|T], Socket, Dict)->
     end,
     handle_server_message(T, Socket, Dict);
 
-handle_server_message([], Socket, Dict) ->
+handle_server_message([], _Socket, Dict) ->
     Dict.
 
 
 channel_handler(Channel) ->
-    % io:format("Channel handler for ~s~n", [Channel]),
+    % io:format("~p Channel handler for ~s~n", [self(), Channel]),
     receive
 	{channel_message, Message} ->
 	    io:format("~p ~s ~s~n", [calendar:local_time(),Channel, Message]),
