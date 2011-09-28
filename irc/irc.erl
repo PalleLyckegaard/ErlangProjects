@@ -139,7 +139,10 @@ handle_server_message([H|T], Socket)->
 		% RPL_LIST (322)
 		"322" ->
 		    Channel = lists:nth(4, Message),
-		    channel_controller_request({join, Channel});
+		    channel_controller_request({add, Channel});
+		% RPL_LISTEND (323)
+		"323" ->
+		    channel_controller_request({subscribe});
 		_ ->
 		    ok
 	    end,
@@ -158,16 +161,18 @@ channel_controller_request(Request) ->
 channel_controller(Dict) ->
     % io:format("channel_controller: ~p~n", [Dict]),
     receive
-	{join, Channel} ->
-	    % io:format("channel_controller: Join request [~s]~n", [Channel]),
+	{add, Channel} ->
+	    % io:format("channel_controller: Addd request [~s]~n", [Channel]),
 	    ChannelPid = spawn(fun() -> channel_handler(Channel) end),
 	    NewDict = dict:store(Channel, ChannelPid, Dict),
 	    send_data(["JOIN", " ", Channel, "\r\n"]),
 	    channel_controller(NewDict);
-	{leave, Channel} ->
-	    % io:format("channel_controller: Leave request [~s]~n", [Channel]),
+	{remove, Channel} ->
+	    % io:format("channel_controller: Remove request [~s]~n", [Channel]),
 	    NewDict=Dict,
 	    channel_controller(NewDict);
+	{subscribe} ->
+	    channel_controller(Dict);
 	{message, Channel, Contents} ->
 	    % io:format("channel_controller: Message request [~s][~s]~n", [Channel, Contents]),
 	    {ok, ChannelPID } = dict:find(Channel, Dict),
@@ -189,4 +194,5 @@ channel_handler(Channel) ->
 	    channel_handler(Channel)
     end.
 
+channel_join(Key
 
