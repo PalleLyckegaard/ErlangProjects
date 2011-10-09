@@ -52,15 +52,12 @@ irc_server() ->
  	    send_data(["LIST\r\n"]),
 	    From ! {irc, ok},
 	    irc_server();
-%	{From, {join, Channel}} ->
-%	    io:format("Got a join request for ~p~n", [Channel]),
-%	    send_join_channel(Channel),
-%	    io:format("Sending a JOIN~n"),
-%	    send_data(["JOIN", " ", Channel, "\r\n"]),
-%	    From ! {irc, ok},
-%	    irc_server();
+	{From, {join, Channel}} ->
+	    channel_controller_request({add, Channel}),
+	    From ! {irc, ok},
+	    irc_server();
 	{From, {leave, Channel}} ->
- 	    send_data(["PART", " ", Channel, "\r\n"]),
+	    channel_controller_request({remove, Channel}),
 	    From ! {irc, ok},
 	    irc_server();
 	Any ->
@@ -162,19 +159,21 @@ channel_controller(Dict) ->
     % io:format("channel_controller: ~p~n", [Dict]),
     receive
 	{add, Channel} ->
-	    % io:format("channel_controller: Addd request [~s]~n", [Channel]),
+	    io:format("channel_controller: Addd request [~s]~n", [Channel]),
 	    ChannelPid = spawn(fun() -> channel_handler(Channel) end),
 	    NewDict = dict:store(Channel, ChannelPid, Dict),
 	    send_data(["JOIN", " ", Channel, "\r\n"]),
 	    channel_controller(NewDict);
 	{remove, Channel} ->
-	    % io:format("channel_controller: Remove request [~s]~n", [Channel]),
+	    io:format("channel_controller: Remove request [~s]~n", [Channel]),
+ 	    send_data(["PART", " ", Channel, "\r\n"]),
 	    NewDict=Dict,
 	    channel_controller(NewDict);
 	{subscribe} ->
+	    io:format("channel_controller: Subscribe request~n"),
 	    channel_controller(Dict);
 	{message, Channel, Contents} ->
-	    % io:format("channel_controller: Message request [~s][~s]~n", [Channel, Contents]),
+	    io:format("channel_controller: Message request [~s][~s]~n", [Channel, Contents]),
 	    {ok, ChannelPID } = dict:find(Channel, Dict),
 	    ChannelPID ! {channel_message, Contents},
 	    channel_controller(Dict);
@@ -193,6 +192,4 @@ channel_handler(Channel) ->
 	    io:format("Received unhandle [~p]~n", [Any]),
 	    channel_handler(Channel)
     end.
-
-channel_join(Key
 
