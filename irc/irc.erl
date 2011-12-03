@@ -132,7 +132,7 @@ handle_server_message([H|T], Socket)->
 	    case Second of 
 		"PRIVMSG" ->
 		    Third = lists:nth(3, Message),
-		    channel_controller_request({message, Third, Message});
+		    channel_controller_request({message, Third, H});
 		% RPL_LIST (322)
 		"322" ->
 		    Channel = lists:nth(4, Message),
@@ -159,7 +159,7 @@ channel_controller(Dict) ->
     % io:format("channel_controller: ~p~n", [Dict]),
     receive
 	{add, Channel} ->
-	    io:format("channel_controller: Addd request [~s]~n", [Channel]),
+	    io:format("channel_controller: Add request [~s]~n", [Channel]),
 	    ChannelPid = spawn(fun() -> channel_handler(Channel) end),
 	    NewDict = dict:store(Channel, ChannelPid, Dict),
 	    send_data(["JOIN", " ", Channel, "\r\n"]),
@@ -173,7 +173,7 @@ channel_controller(Dict) ->
 	    io:format("channel_controller: Subscribe request~n"),
 	    channel_controller(Dict);
 	{message, Channel, Contents} ->
-	    io:format("channel_controller: Message request [~s][~s]~n", [Channel, Contents]),
+	    %io:format("channel_controller: Message request [~s][~s]~n", [Channel, Contents]),
 	    {ok, ChannelPID } = dict:find(Channel, Dict),
 	    ChannelPID ! {channel_message, Contents},
 	    channel_controller(Dict);
